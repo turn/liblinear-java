@@ -2,24 +2,29 @@ package de.bwaldvogel.liblinear;
 
 import static de.bwaldvogel.liblinear.Linear.info;
 
-import java.util.concurrent.atomic.AtomicBoolean;
-
-
 /**
  * Trust Region Newton Method optimization
  */
 class Tron {
 
     private final Function fun_obj;
-    private final double   eps;
-    private final int      max_iter;
-    private final double   eps_cg;
 
-    public Tron(Function fun_obj, double eps, int max_iter, double eps_cg) {
+    private final double   eps;
+
+    private final int      max_iter;
+
+    public Tron( final Function fun_obj ) {
+        this(fun_obj, 0.1);
+    }
+
+    public Tron( final Function fun_obj, double eps ) {
+        this(fun_obj, eps, 1000);
+    }
+
+    public Tron( final Function fun_obj, double eps, int max_iter ) {
         this.fun_obj = fun_obj;
         this.eps = eps;
         this.max_iter = max_iter;
-        this.eps_cg = eps_cg;
     }
 
     void tron(double[] w) {
@@ -36,30 +41,24 @@ class Tron {
         int search = 1, iter = 1;
         double[] s = new double[n];
         double[] r = new double[n];
+        double[] w_new = new double[n];
         double[] g = new double[n];
 
-        // calculate gradient norm at w=0 for stopping condition.
-        double[] w0 = new double[n];
         for (i = 0; i < n; i++)
-            w0[i] = 0;
-        fun_obj.fun(w0);
-        fun_obj.grad(w0, g);
-        double gnorm0 = euclideanNorm(g);
+            w[i] = 0;
 
         f = fun_obj.fun(w);
         fun_obj.grad(w, g);
         delta = euclideanNorm(g);
-        double gnorm = delta;
+        double gnorm1 = delta;
+        double gnorm = gnorm1;
 
-        if (gnorm <= eps * gnorm0)
-            search = 0;
+        if (gnorm <= eps * gnorm1) search = 0;
 
         iter = 1;
 
-        double[] w_new = new double[n];
-        AtomicBoolean reach_boundary = new AtomicBoolean();
         while (iter <= max_iter && search != 0) {
-            cg_iter = trcg(delta, g, s, r, reach_boundary);
+            cg_iter = trcg(delta, g, s, r);
 
             System.arraycopy(w, 0, w_new, 0, n);
             daxpy(one, s, w_new);
@@ -89,13 +88,8 @@ class Tron {
                 delta = Math.max(sigma1 * delta, Math.min(alpha * snorm, sigma2 * delta));
             else if (actred < eta2 * prered)
                 delta = Math.max(sigma1 * delta, Math.min(alpha * snorm, sigma3 * delta));
-            else {
-                if (reach_boundary.get()) {
-                    delta = sigma3 * delta;
-                } else {
-                    delta = Math.max(delta, Math.min(alpha * snorm, sigma3 * delta));
-                }
-            }
+            else
+                delta = Math.max(delta, Math.min(alpha * snorm, sigma3 * delta));
 
             info("iter %2d act %5.3e pre %5.3e delta %5.3e f %5.3e |g| %5.3e CG %3d%n", iter, actred, prered, delta, f, gnorm, cg_iter);
 
@@ -106,15 +100,14 @@ class Tron {
                 fun_obj.grad(w, g);
 
                 gnorm = euclideanNorm(g);
-                if (gnorm <= eps * gnorm0)
-                    break;
+                if (gnorm <= eps * gnorm1) break;
             }
             if (f < -1.0e+32) {
                 info("WARNING: f < -1.0e+32%n");
                 break;
             }
-            if (prered <= 0) {
-                info("WARNING: prered <= 0%n");
+            if (Math.abs(actred) <= 0 && prered <= 0) {
+                info("WARNING: actred and prered <= 0%n");
                 break;
             }
             if (Math.abs(actred) <= 1.0e-12 * Math.abs(f) && Math.abs(prered) <= 1.0e-12 * Math.abs(f)) {
@@ -124,20 +117,19 @@ class Tron {
         }
     }
 
-    private int trcg(double delta, double[] g, double[] s, double[] r, AtomicBoolean reach_boundary) {
+    private int trcg(double delta, double[] g, double[] s, double[] r) {
         int n = fun_obj.get_nr_variable();
         double one = 1;
         double[] d = new double[n];
         double[] Hd = new double[n];
         double rTr, rnewTrnew, cgtol;
 
-        reach_boundary.set(false);
         for (int i = 0; i < n; i++) {
             s[i] = 0;
             r[i] = -g[i];
             d[i] = r[i];
         }
-        cgtol = eps_cg * euclideanNorm(g);
+        cgtol = 0.1 * euclideanNorm(g);
 
         int cg_iter = 0;
         rTr = dot(r, r);
@@ -151,7 +143,6 @@ class Tron {
             daxpy(alpha, d, s);
             if (euclideanNorm(s) > delta) {
                 info("cg reaches trust region boundary%n");
-                reach_boundary.set(true);
                 alpha = -alpha;
                 daxpy(alpha, d, s);
 

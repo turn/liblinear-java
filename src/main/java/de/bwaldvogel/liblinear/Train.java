@@ -5,11 +5,8 @@ import static de.bwaldvogel.liblinear.Linear.atoi;
 
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileInputStream;
+import java.io.FileReader;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -23,27 +20,12 @@ public class Train {
     }
 
     private double    bias             = 1;
-    private boolean   find_C           = false;
-    private boolean   C_specified      = false;
-    private boolean   solver_specified = false;
     private boolean   cross_validation = false;
     private String    inputFilename;
     private String    modelFilename;
     private int       nr_fold;
     private Parameter param            = null;
     private Problem   prob             = null;
-
-    private void do_find_parameter_C() {
-        double start_C;
-        double max_C = 1024;
-        if (C_specified)
-            start_C = param.C;
-        else
-            start_C = -1.0;
-        System.out.printf("Doing parameter search with %d-fold cross validation.%n", nr_fold);
-        ParameterSearchResult result = Linear.findParameterC(prob, param, nr_fold, start_C, max_C);
-        System.out.printf("Best C = %g  CV accuracy = %g%%%n", result.getBestC(), 100.0 * result.getBestRate());
-    }
 
     private void do_cross_validation() {
 
@@ -109,13 +91,12 @@ public class Train {
             + "   -s 5 and 6%n"
             + "       |f'(w)|_1 <= eps*min(pos,neg)/l*|f'(w0)|_1,%n"
             + "       where f is the primal function (default 0.01)%n"
-            + "   -s 12 and 13%n"
-            + "       |f'(alpha)|_1 <= eps |f'(alpha0)|,%n"
-            + "       where f is the dual function (default 0.1)%n"
+            + "   -s 12 and 13\n"
+            + "       |f'(alpha)|_1 <= eps |f'(alpha0)|,\n"
+            + "       where f is the dual function (default 0.1)\n"
             + "-B bias : if bias >= 0, instance x becomes [x; bias]; if < 0, no bias term added (default -1)%n"
             + "-wi weight: weights adjust the parameter C of different classes (see README for details)%n"
             + "-v n: n-fold cross validation mode%n"
-            + "-C : find parameter C (only for -s 0 and 2)%n"
             + "-q : quiet mode (no outputs)%n");
         System.exit(1);
     }
@@ -149,11 +130,9 @@ public class Train {
             switch (argv[i - 1].charAt(1)) {
                 case 's':
                     param.solverType = SolverType.getById(atoi(argv[i]));
-                    solver_specified = true;
                     break;
                 case 'c':
                     param.setC(atof(argv[i]));
-                    C_specified = true;
                     break;
                 case 'p':
                     param.setP(atof(argv[i]));
@@ -182,10 +161,6 @@ public class Train {
                     i--;
                     Linear.disableDebugOutput();
                     break;
-                case 'C':
-                    find_C = true;
-                    i--;
-                    break;
                 default:
                     System.err.println("unknown option");
                     exit_with_help();
@@ -204,19 +179,6 @@ public class Train {
             int p = argv[i].lastIndexOf('/');
             ++p; // whew...
             modelFilename = argv[i].substring(p) + ".model";
-        }
-
-        // default solver for parameter selection is L2R_L2LOSS_SVC
-        if (find_C) {
-            if (!cross_validation)
-                nr_fold = 5;
-            if (!solver_specified) {
-                System.err.printf("Solver not specified. Using -s 2%n");
-                param.setSolverType(SolverType.L2R_L2LOSS_SVC);
-            } else if (param.getSolverType() != SolverType.L2R_LR && param.getSolverType() != SolverType.L2R_L2LOSS_SVC) {
-                System.err.printf("Warm-start parameter search only available for -s 0 and -s 2%n");
-                exit_with_help();
-            }
         }
 
         if (param.eps == Double.POSITIVE_INFINITY) {
@@ -255,95 +217,79 @@ public class Train {
      * @throws InvalidInputDataException if the input file is not correctly formatted
      */
     public static Problem readProblem(File file, double bias) throws IOException, InvalidInputDataException {
-        try (InputStream inputStream = new FileInputStream(file)) {
-            return readProblem(inputStream, bias);
-        }
-    }
-
-    public static Problem readProblem(File file, Charset charset, double bias) throws IOException, InvalidInputDataException {
-        try (InputStream inputStream = new FileInputStream(file)) {
-            return readProblem(inputStream, charset, bias);
-        }
-    }
-
-    public static Problem readProblem(InputStream inputStream, double bias) throws IOException, InvalidInputDataException {
-        return readProblem(inputStream, Charset.defaultCharset(), bias);
-    }
-
-    public static Problem readProblem(InputStream inputStream, Charset charset, double bias) throws IOException, InvalidInputDataException {
-        BufferedReader fp = new BufferedReader(new InputStreamReader(inputStream, charset));
-        List<Double> vy = new ArrayList<>();
-        List<Feature[]> vx = new ArrayList<>();
+        BufferedReader fp = new BufferedReader(new FileReader(file));
+        List<Double> vy = new ArrayList<Double>();
+        List<Feature[]> vx = new ArrayList<Feature[]>();
         int max_index = 0;
 
         int lineNr = 0;
 
-        while (true) {
-            String line = fp.readLine();
-            if (line == null) break;
-            lineNr++;
+        try {
+            while (true) {
+                String line = fp.readLine();
+                if (line == null) break;
+                lineNr++;
 
-            StringTokenizer st = new StringTokenizer(line, " \t\n\r\f:");
-            String token;
-            try {
-                token = st.nextToken();
-            } catch (NoSuchElementException e) {
-                throw new InvalidInputDataException("empty line", lineNr, e);
-            }
-
-            try {
-                vy.add(atof(token));
-            } catch (NumberFormatException e) {
-                throw new InvalidInputDataException("invalid label: " + token, lineNr, e);
-            }
-
-            int m = st.countTokens() / 2;
-            Feature[] x;
-            if (bias >= 0) {
-                x = new Feature[m + 1];
-            } else {
-                x = new Feature[m];
-            }
-            int indexBefore = 0;
-            for (int j = 0; j < m; j++) {
-
-                token = st.nextToken();
-                int index;
+                StringTokenizer st = new StringTokenizer(line, " \t\n\r\f:");
+                String token;
                 try {
-                    index = atoi(token);
-                } catch (NumberFormatException e) {
-                    throw new InvalidInputDataException("invalid index: " + token, lineNr, e);
+                    token = st.nextToken();
+                } catch (NoSuchElementException e) {
+                    throw new InvalidInputDataException("empty line", file, lineNr, e);
                 }
 
-                // assert that indices are valid and sorted
-                if (index <= 0) throw new InvalidInputDataException("invalid index: " + index, lineNr);
-                if (index <= indexBefore)
-                    throw new InvalidInputDataException("indices must be sorted in ascending order", lineNr);
-                indexBefore = index;
-
-                token = st.nextToken();
                 try {
-                    double value = atof(token);
-                    x[j] = new FeatureNode(index, value);
+                    vy.add(atof(token));
                 } catch (NumberFormatException e) {
-                    throw new InvalidInputDataException("invalid value: " + token, lineNr);
+                    throw new InvalidInputDataException("invalid label: " + token, file, lineNr, e);
                 }
-            }
-            if (m > 0) {
-                max_index = Math.max(max_index, x[m - 1].getIndex());
+
+                int m = st.countTokens() / 2;
+                Feature[] x;
+                if (bias >= 0) {
+                    x = new Feature[m + 1];
+                } else {
+                    x = new Feature[m];
+                }
+                int indexBefore = 0;
+                for (int j = 0; j < m; j++) {
+
+                    token = st.nextToken();
+                    int index;
+                    try {
+                        index = atoi(token);
+                    } catch (NumberFormatException e) {
+                        throw new InvalidInputDataException("invalid index: " + token, file, lineNr, e);
+                    }
+
+                    // assert that indices are valid and sorted
+                    if (index < 0) throw new InvalidInputDataException("invalid index: " + index, file, lineNr);
+                    if (index <= indexBefore) throw new InvalidInputDataException("indices must be sorted in ascending order", file, lineNr);
+                    indexBefore = index;
+
+                    token = st.nextToken();
+                    try {
+                        double value = atof(token);
+                        x[j] = new FeatureNode(index, value);
+                    } catch (NumberFormatException e) {
+                        throw new InvalidInputDataException("invalid value: " + token, file, lineNr);
+                    }
+                }
+                if (m > 0) {
+                    max_index = Math.max(max_index, x[m - 1].getIndex());
+                }
+
+                vx.add(x);
             }
 
-            vx.add(x);
+            return constructProblem(vy, vx, max_index, bias);
         }
-
-        return constructProblem(vy, vx, max_index, bias);
+        finally {
+            fp.close();
+        }
     }
 
-    public void readProblem(String filename) throws IOException, InvalidInputDataException {
-        readProblem(filename, bias);
-    }
-
-    public void readProblem(String filename, double bias) throws IOException, InvalidInputDataException {
+    void readProblem(String filename) throws IOException, InvalidInputDataException {
         prob = Train.readProblem(new File(filename), bias);
     }
 
@@ -395,21 +341,11 @@ public class Train {
     private void run(String[] args) throws IOException, InvalidInputDataException {
         parse_command_line(args);
         readProblem(inputFilename);
-        if (find_C) {
-            do_find_parameter_C();
-        } else if (cross_validation)
+        if (cross_validation)
             do_cross_validation();
         else {
             Model model = Linear.train(prob, param);
             Linear.saveModel(new File(modelFilename), model);
         }
-    }
-
-    boolean isFindC() {
-        return find_C;
-    }
-
-    int getNumFolds() {
-        return nr_fold;
     }
 }

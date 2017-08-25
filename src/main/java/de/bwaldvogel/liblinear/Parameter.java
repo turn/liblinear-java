@@ -20,32 +20,27 @@ public final class Parameter {
 
     double     p = 0.1;
 
-    /**
-     * Initial-solution specification (only supported for {@link SolverType#L2R_LR} and {@link SolverType#L2R_L2LOSS_SVC})
-     */
-    double[]   init_sol = null;
-
-    public Parameter(SolverType solver, double C, double eps) {
+    public Parameter( SolverType solver, double C, double eps ) {
         setSolverType(solver);
         setC(C);
         setEps(eps);
     }
 
-    public Parameter(SolverType solver, double C, int max_iters, double eps) {
+    public Parameter( SolverType solver, double C, int max_iters, double eps ) {
         setSolverType(solver);
         setC(C);
         setEps(eps);
         setMaxIters(max_iters);
     }
 
-    public Parameter(SolverType solverType, double C, double eps, double p) {
+    public Parameter( SolverType solverType, double C, double eps, double p ) {
         setSolverType(solverType);
         setC(C);
         setEps(eps);
         setP(p);
     }
 
-    public Parameter(SolverType solverType, double C, double eps, int max_iters, double p) {
+    public Parameter( SolverType solverType, double C, double eps, int max_iters, double p ) {
         setSolverType(solverType);
         setC(C);
         setEps(eps);

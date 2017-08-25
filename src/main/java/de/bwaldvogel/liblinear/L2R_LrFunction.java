@@ -7,7 +7,7 @@ class L2R_LrFunction implements Function {
     private final double[] D;
     private final Problem  prob;
 
-    public L2R_LrFunction(Problem prob, double[] C) {
+    public L2R_LrFunction( Problem prob, double[] C ) {
         int l = prob.l;
 
         this.prob = prob;
@@ -17,12 +17,15 @@ class L2R_LrFunction implements Function {
         this.C = C;
     }
 
-    private void Xv(double[] v, double[] Xv) {
-        int l = prob.l;
-        Feature[][] x = prob.x;
 
-        for (int i = 0; i < l; i++)
-            Xv[i] = SparseOperator.dot(v, x[i]);
+    private void Xv(double[] v, double[] Xv) {
+
+        for (int i = 0; i < prob.l; i++) {
+            Xv[i] = 0;
+            for (Feature s : prob.x[i]) {
+                Xv[i] += v[s.getIndex() - 1] * s.getValue();
+            }
+        }
     }
 
     private void XTv(double[] v, double[] XTv) {
@@ -34,9 +37,12 @@ class L2R_LrFunction implements Function {
             XTv[i] = 0;
 
         for (int i = 0; i < l; i++) {
-            SparseOperator.axpy(v[i], x[i], XTv);
+            for (Feature s : x[i]) {
+                XTv[s.getIndex() - 1] += v[i] * s.getValue();
+            }
         }
     }
+
 
     public double fun(double[] w) {
         int i;
@@ -82,20 +88,16 @@ class L2R_LrFunction implements Function {
         int i;
         int l = prob.l;
         int w_size = get_nr_variable();
-        Feature[][] x = prob.x;
+        double[] wa = new double[l];
 
-        for (i = 0; i < w_size; i++)
-            Hs[i] = 0;
-        for (i = 0; i < l; i++) {
-            Feature[] xi = x[i];
-            double xTs = SparseOperator.dot(s, xi);
+        Xv(s, wa);
+        for (i = 0; i < l; i++)
+            wa[i] = C[i] * D[i] * wa[i];
 
-            xTs = C[i] * D[i] * xTs;
-
-            SparseOperator.axpy(xTs, xi, Hs);
-        }
+        XTv(wa, Hs);
         for (i = 0; i < w_size; i++)
             Hs[i] = s[i] + Hs[i];
+        // delete[] wa;
     }
 
     public int get_nr_variable() {

@@ -2,6 +2,7 @@ package de.bwaldvogel.liblinear;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
+import java.io.Closeable;
 import java.io.EOFException;
 import java.io.File;
 import java.io.FileInputStream;
@@ -13,7 +14,6 @@ import java.io.PrintStream;
 import java.io.Reader;
 import java.io.Writer;
 import java.nio.charset.Charset;
-import java.nio.charset.StandardCharsets;
 import java.util.Formatter;
 import java.util.Locale;
 import java.util.Random;
@@ -28,13 +28,11 @@ import java.util.regex.Pattern;
  *
  * <p><em>The port was done by Benedikt Waldvogel (mail at bwaldvogel.de)</em></p>
  *
- * @version 2.11
+ * @version 1.95
  */
 public class Linear {
 
-    static final int           VERSION             = 211;
-
-    static final Charset       FILE_CHARSET        = StandardCharsets.ISO_8859_1;
+    static final Charset       FILE_CHARSET        = Charset.forName("ISO-8859-1");
 
     static final Locale        DEFAULT_LOCALE      = Locale.ENGLISH;
 
@@ -96,131 +94,6 @@ public class Linear {
         }
     }
 
-    public static ParameterSearchResult findParameterC(Problem prob, Parameter param, int nr_fold, double start_C, double max_C) {
-        // variables for CV
-        int i;
-        int l = prob.l;
-        int[] perm = new int[l];
-        double[] target = new double[prob.l];
-        Problem[] subprob = new Problem[nr_fold];
-
-        // variables for warm start
-        double ratio = 2;
-        double[][] prev_w = new double[nr_fold][];
-        int num_unchanged_w = 0;
-        Parameter param1 = param;
-
-        if (nr_fold > l) {
-            nr_fold = l;
-            System.err.println("WARNING: # folds > # data. Will use # folds = # data instead (i.e., leave-one-out cross validation)");
-        }
-        int[] fold_start = new int[nr_fold + 1];
-        for (i = 0; i < l; i++) perm[i] = i;
-        for (i = 0; i < l; i++) {
-            int j = i + random.nextInt(l - i);
-            swap(perm, i, j);
-        }
-        for (i = 0; i <= nr_fold; i++)
-            fold_start[i] = i * l / nr_fold;
-
-        for (i = 0; i < nr_fold; i++) {
-            int begin = fold_start[i];
-            int end = fold_start[i + 1];
-            int j, k;
-
-            assert subprob[i] == null;
-            subprob[i] = new Problem();
-            subprob[i].bias = prob.bias;
-            subprob[i].n = prob.n;
-            subprob[i].l = l - (end - begin);
-            subprob[i].x = new Feature[subprob[i].l][];
-            subprob[i].y = new double[subprob[i].l];
-
-            k = 0;
-            for (j = 0; j < begin; j++) {
-                subprob[i].x[k] = prob.x[perm[j]];
-                subprob[i].y[k] = prob.y[perm[j]];
-                ++k;
-            }
-            for (j = end; j < l; j++) {
-                subprob[i].x[k] = prob.x[perm[j]];
-                subprob[i].y[k] = prob.y[perm[j]];
-                ++k;
-            }
-
-        }
-
-        double best_C = Double.NaN;
-        double best_rate = 0;
-        if (start_C <= 0)
-            start_C = calc_start_C(prob, param);
-        param1.C = start_C;
-
-        while (param1.C <= max_C) {
-            // Output disabled for running CV at a particular C
-            disableDebugOutput();
-
-            for (i = 0; i < nr_fold; i++) {
-                int j;
-                int begin = fold_start[i];
-                int end = fold_start[i + 1];
-
-                param1.init_sol = prev_w[i];
-                Model submodel = train(subprob[i], param1);
-
-                int total_w_size;
-                if (submodel.nr_class == 2)
-                    total_w_size = subprob[i].n;
-                else
-                    total_w_size = subprob[i].n * submodel.nr_class;
-
-                if (prev_w[i] == null) {
-                    prev_w[i] = new double[total_w_size];
-                    for (j = 0; j < total_w_size; j++)
-                        prev_w[i][j] = submodel.w[j];
-                } else if (num_unchanged_w >= 0) {
-                    double norm_w_diff = 0;
-                    for (j = 0; j < total_w_size; j++) {
-                        norm_w_diff += (submodel.w[j] - prev_w[i][j]) * (submodel.w[j] - prev_w[i][j]);
-                        prev_w[i][j] = submodel.w[j];
-                    }
-                    norm_w_diff = Math.sqrt(norm_w_diff);
-
-                    if (norm_w_diff > 1e-15)
-                        num_unchanged_w = -1;
-                } else {
-                    for (j = 0; j < total_w_size; j++)
-                        prev_w[i][j] = submodel.w[j];
-                }
-
-                for (j = begin; j < end; j++)
-                    target[perm[j]] = predict(submodel, prob.x[perm[j]]);
-            }
-            enableDebugOutput();
-
-            int total_correct = 0;
-            for (i = 0; i < prob.l; i++)
-                if (target[i] == prob.y[i])
-                    ++total_correct;
-            double current_rate = (double) total_correct / prob.l;
-            if (current_rate > best_rate) {
-                best_C = param1.C;
-                best_rate = current_rate;
-            }
-
-            info("log2c=%7.2f\trate=%g%n", Math.log(param1.C) / Math.log(2.0), 100.0 * current_rate);
-            num_unchanged_w++;
-            if (num_unchanged_w == 3)
-                break;
-            param1.C = param1.C * ratio;
-        }
-
-        if (param1.C > max_C && max_C > start_C)
-            info("warning: maximum C reached.\n");
-
-        return new ParameterSearchResult(best_C, best_rate);
-    }
-
     /** used as complex return type */
     private static class GroupClassesReturn {
 
@@ -229,7 +102,7 @@ public class Linear {
         final int   nr_class;
         final int[] start;
 
-        GroupClassesReturn(int nr_class, int[] label, int[] start, int[] count) {
+        GroupClassesReturn( int nr_class, int[] label, int[] start, int[] count ) {
             this.nr_class = nr_class;
             this.label = label;
             this.start = start;
@@ -248,7 +121,7 @@ public class Linear {
         int i;
 
         for (i = 0; i < l; i++) {
-            int this_label = (int) prob.y[i];
+            int this_label = (int)prob.y[i];
             int j;
             for (j = 0; j < nr_class; j++) {
                 if (this_label == label[j]) {
@@ -375,7 +248,7 @@ public class Linear {
 
         BufferedReader reader = null;
         if (inputReader instanceof BufferedReader) {
-            reader = (BufferedReader) inputReader;
+            reader = (BufferedReader)inputReader;
         } else {
             reader = new BufferedReader(inputReader);
         }
@@ -429,11 +302,6 @@ public class Linear {
                         model.w[i * nr_w + j] = atof(new String(buffer, 0, b));
                         break;
                     } else {
-                        if (b >= buffer.length) {
-                            throw new RuntimeException("illegal weight in model file at index " + (i * nr_w + j) + ", with string content '" +
-                                    new String(buffer, 0, buffer.length) + "', is not terminated " +
-                                    "with a whitespace character, or is longer than expected (" + buffer.length + " characters max).");
-                        }
                         buffer[b++] = ch;
                     }
                 }
@@ -448,11 +316,20 @@ public class Linear {
      * It uses {@link java.util.Locale#ENGLISH} for number formatting.
      */
     public static Model loadModel(File modelFile) throws IOException {
-        try (FileInputStream in = new FileInputStream(modelFile);
-             InputStreamReader inputStreamReader = new InputStreamReader(in, FILE_CHARSET);
-             BufferedReader inputReader = new BufferedReader(inputStreamReader)) {
+        BufferedReader inputReader = new BufferedReader(new InputStreamReader(new FileInputStream(modelFile), FILE_CHARSET));
+        try {
             return loadModel(inputReader);
         }
+        finally {
+            inputReader.close();
+        }
+    }
+
+    static void closeQuietly(Closeable c) {
+        if (c == null) return;
+        try {
+            c.close();
+        } catch (Throwable t) {}
     }
 
     public static double predict(Model model, Feature[] x) {
@@ -565,7 +442,8 @@ public class Linear {
         int nr_w = model.nr_class;
         if (model.nr_class == 2 && model.solverType != SolverType.MCSVM_CS) nr_w = 1;
 
-        try (Formatter formatter = new Formatter(modelOutput, DEFAULT_LOCALE)) {
+        Formatter formatter = new Formatter(modelOutput, DEFAULT_LOCALE);
+        try {
             printf(formatter, "solver_type %s\n", model.solverType.name());
             printf(formatter, "nr_class %d\n", model.nr_class);
 
@@ -598,6 +476,9 @@ public class Linear {
             formatter.flush();
             IOException ioException = formatter.ioException();
             if (ioException != null) throw ioException;
+        }
+        finally {
+            formatter.close();
         }
     }
 
@@ -646,12 +527,13 @@ public class Linear {
      * See Algorithm 3 of Hsieh et al., ICML 2008
      *</pre>
      */
-    private static void solve_l2r_l1l2_svc(Problem prob, double[] w, double eps, double Cp, double Cn, SolverType solver_type, int max_iter) {
+    private static void solve_l2r_l1l2_svc(Problem prob, double[] w, double eps, double Cp, double Cn, SolverType solver_type) {
         int l = prob.l;
         int w_size = prob.n;
         int i, s, iter = 0;
         double C, d, G;
         double[] QD = new double[l];
+        int max_iter = 1000;
         int[] index = new int[l];
         double[] alpha = new double[l];
         byte[] y = new byte[l];
@@ -691,10 +573,11 @@ public class Linear {
         for (i = 0; i < l; i++) {
             QD[i] = diag[GETI(y, i)];
 
-            Feature[] xi = prob.x[i];
-            QD[i] += SparseOperator.nrm2_sq(xi);
-            SparseOperator.axpy(y[i] * alpha[i], xi, w);
-
+            for (Feature xi : prob.x[i]) {
+                double val = xi.getValue();
+                QD[i] += val * val;
+                w[xi.getIndex() - 1] += y[i] * alpha[i] * val;
+            }
             index[i] = i;
         }
 
@@ -709,10 +592,13 @@ public class Linear {
 
             for (s = 0; s < active_size; s++) {
                 i = index[s];
+                G = 0;
                 byte yi = y[i];
-                Feature[] xi = prob.x[i];
 
-                G = yi * SparseOperator.dot(w, xi) - 1;
+                for (Feature xi : prob.x[i]) {
+                    G += w[xi.getIndex() - 1] * xi.getValue();
+                }
+                G = G * yi - 1;
 
                 C = upper_bound[GETI(y, i)];
                 G += alpha[i] * diag[GETI(y, i)];
@@ -747,7 +633,10 @@ public class Linear {
                     double alpha_old = alpha[i];
                     alpha[i] = Math.min(Math.max(alpha[i] - G / QD[i], 0.0), C);
                     d = (alpha[i] - alpha_old) * yi;
-                    SparseOperator.axpy(d, xi, w);
+
+                    for (Feature xi : prob.x[i]) {
+                        w[xi.getIndex() - 1] += d * xi.getValue();
+                    }
                 }
             }
 
@@ -832,7 +721,7 @@ public class Linear {
         double d, G, H;
         double Gmax_old = Double.POSITIVE_INFINITY;
         double Gmax_new, Gnorm1_new;
-        double Gnorm1_init = -1.0; // Gnorm1_init is initialized at the first iteration
+        double Gnorm1_init= -1.0; // Gnorm1_init is initialized at the first iteration
         double[] beta = new double[l];
         double[] QD = new double[l];
         double[] y = prob.y;
@@ -854,12 +743,16 @@ public class Linear {
         for (i = 0; i < w_size; i++)
             w[i] = 0;
         for (i = 0; i < l; i++) {
-            Feature[] xi = prob.x[i];
-            QD[i] = SparseOperator.nrm2_sq(xi);
-            SparseOperator.axpy(beta[i], xi, w);
+            QD[i] = 0;
+            for (Feature xi : prob.x[i]) {
+                double val = xi.getValue();
+                QD[i] += val * val;
+                w[xi.getIndex() - 1] += beta[i] * val;
+            }
 
             index[i] = i;
         }
+
 
         while (iter < max_iter) {
             Gmax_new = 0;
@@ -875,8 +768,11 @@ public class Linear {
                 G = -y[i] + lambda[GETI_SVR(i)] * beta[i];
                 H = QD[i] + lambda[GETI_SVR(i)];
 
-                Feature[] xi = prob.x[i];
-                G += SparseOperator.dot(w, xi);
+                for (Feature xi : prob.x[i]) {
+                    int ind = xi.getIndex() - 1;
+                    double val = xi.getValue();
+                    G += val * w[ind];
+                }
 
                 double Gp = G + p;
                 double Gn = G - p;
@@ -932,8 +828,11 @@ public class Linear {
                 beta[i] = Math.min(Math.max(beta[i] + d, -upper_bound[GETI_SVR(i)]), upper_bound[GETI_SVR(i)]);
                 d = beta[i] - beta_old;
 
-                if (d != 0)
-                    SparseOperator.axpy(d, xi, w);
+                if (d != 0) {
+                    for (Feature xi : prob.x[i]) {
+                        w[xi.getIndex() - 1] += d * xi.getValue();
+                    }
+                }
             }
 
             if (iter == 0) Gnorm1_init = Gnorm1_new;
@@ -994,11 +893,12 @@ public class Linear {
      *
      * @since 1.7
      */
-    private static void solve_l2r_lr_dual(Problem prob, double w[], double eps, double Cp, double Cn, int max_iter) {
+    private static void solve_l2r_lr_dual(Problem prob, double w[], double eps, double Cp, double Cn) {
         int l = prob.l;
         int w_size = prob.n;
         int i, s, iter = 0;
         double xTx[] = new double[l];
+        int max_iter = 1000;
         int index[] = new int[l];
         double alpha[] = new double[2 * l]; // store alpha and C - alpha
         byte y[] = new byte[l];
@@ -1026,9 +926,12 @@ public class Linear {
         for (i = 0; i < w_size; i++)
             w[i] = 0;
         for (i = 0; i < l; i++) {
-            Feature[] xi = prob.x[i];
-            xTx[i] = SparseOperator.nrm2_sq(xi);
-            SparseOperator.axpy(y[i] * alpha[2 * i], xi, w);
+            xTx[i] = 0;
+            for (Feature xi : prob.x[i]) {
+                double val = xi.getValue();
+                xTx[i] += val * val;
+                w[xi.getIndex() - 1] += y[i] * alpha[2 * i] * val;
+            }
             index[i] = i;
         }
 
@@ -1041,11 +944,13 @@ public class Linear {
             double Gmax = 0;
             for (s = 0; s < l; s++) {
                 i = index[s];
-                final byte yi = y[i];
+                byte yi = y[i];
                 double C = upper_bound[GETI(y, i)];
                 double ywTx = 0, xisq = xTx[i];
-                Feature[] xi = prob.x[i];
-                ywTx = yi * SparseOperator.dot(w, xi);
+                for (Feature xi : prob.x[i]) {
+                    ywTx += w[xi.getIndex() - 1] * xi.getValue();
+                }
+                ywTx *= y[i];
                 double a = xisq, b = ywTx;
 
                 // Decide to minimize g_1(z) or g_2(z)
@@ -1084,7 +989,9 @@ public class Linear {
                 {
                     alpha[ind1] = z;
                     alpha[ind2] = C - z;
-                    SparseOperator.axpy(sign * (z - alpha_old) * yi, xi, w);
+                    for (Feature xi : prob.x[i]) {
+                        w[xi.getIndex() - 1] += sign * (z - alpha_old) * yi * xi.getValue();
+                    }
                 }
             }
 
@@ -1132,10 +1039,11 @@ public class Linear {
      *
      * @since 1.5
      */
-    private static void solve_l1r_l2_svc(Problem prob_col, double[] w, double eps, double Cp, double Cn, int max_iter) {
+    private static void solve_l1r_l2_svc(Problem prob_col, double[] w, double eps, double Cp, double Cn) {
         int l = prob_col.l;
         int w_size = prob_col.n;
         int j, s, iter = 0;
+        int max_iter = 1000;
         int active_size = w_size;
         int max_num_linesearch = 20;
 
@@ -1250,8 +1158,9 @@ public class Linear {
 
                     appxcond = xj_sq[j] * d * d + G_loss * d + cond;
                     if (appxcond <= 0) {
-                        Feature[] x = prob_col.x[j];
-                        SparseOperator.axpy(d_diff, x, b);
+                        for (Feature x : prob_col.x[j]) {
+                            b[x.getIndex() - 1] += d_diff * x.getValue();
+                        }
                         break;
                     }
 
@@ -1301,8 +1210,9 @@ public class Linear {
 
                     for (int i = 0; i < w_size; i++) {
                         if (w[i] == 0) continue;
-                        Feature[] x = prob_col.x[i];
-                        SparseOperator.axpy(-w[i], x, b);
+                        for (Feature x : prob_col.x[i]) {
+                            b[x.getIndex() - 1] -= w[i] * x.getValue();
+                        }
                     }
                 }
             }
@@ -1368,11 +1278,12 @@ public class Linear {
      *
      * @since 1.5
      */
-    private static void solve_l1r_lr(Problem prob_col, double[] w, double eps, double Cp, double Cn, int max_iter) {
+    private static void solve_l1r_lr(Problem prob_col, double[] w, double eps, double Cp, double Cn) {
         int l = prob_col.l;
         int w_size = prob_col.n;
         int j, s, newton_iter = 0, iter = 0;
         int max_newton_iter = 100;
+        int max_iter = 1000;
         int max_num_linesearch = 20;
         int active_size;
         int QP_active_size;
@@ -1547,8 +1458,10 @@ public class Linear {
 
                     wpd[j] += z;
 
-                    Feature[] x = prob_col.x[j];
-                    SparseOperator.axpy(z, x, xTd);
+                    for (Feature x : prob_col.x[j]) {
+                        int ind = x.getIndex() - 1;
+                        xTd[ind] += x.getValue() * z;
+                    }
                 }
 
                 iter++;
@@ -1623,8 +1536,9 @@ public class Linear {
 
                 for (int i = 0; i < w_size; i++) {
                     if (w[i] == 0) continue;
-                    Feature[] x = prob_col.x[i];
-                    SparseOperator.axpy(w[i], x, exp_wTx);
+                    for (Feature x : prob_col.x[i]) {
+                        exp_wTx[x.getIndex() - 1] += w[i] * x.getValue();
+                    }
                 }
 
                 for (int i = 0; i < l; i++)
@@ -1717,6 +1631,7 @@ public class Linear {
         array.set(idxB, temp);
     }
 
+
     /**
      * @throws IllegalArgumentException if the feature nodes of prob are not sorted in ascending order
      */
@@ -1732,14 +1647,10 @@ public class Linear {
             int indexBefore = 0;
             for (Feature n : nodes) {
                 if (n.getIndex() <= indexBefore) {
-                    throw new IllegalArgumentException("feature nodes must be sorted by index in ascending order");
+                    throw new IllegalArgumentException("feature nodes must be sorted by index in ascending order"+n.toString()+" "+indexBefore);
                 }
                 indexBefore = n.getIndex();
             }
-        }
-
-        if (param.init_sol != null && param.getSolverType() != SolverType.L2R_LR && param.getSolverType() != SolverType.L2R_L2LOSS_SVC) {
-            throw new IllegalArgumentException("Initial-solution specification supported only for solver L2R_LR and L2R_L2LOSS_SVC");
         }
 
         int l = prob.l;
@@ -1757,8 +1668,6 @@ public class Linear {
 
         if (param.solverType.isSupportVectorRegression()) {
             model.w = new double[w_size];
-            for (int i = 0; i < w_size; i++)
-                model.w[i] = 0;
             model.nr_class = 2;
             model.label = null;
 
@@ -1831,13 +1740,6 @@ public class Linear {
                     for (; k < sub_prob.l; k++)
                         sub_prob.y[k] = -1;
 
-                    if (param.init_sol != null)
-                        for (int i = 0; i < w_size; i++)
-                            model.w[i] = param.init_sol[i];
-                    else
-                        for (int i = 0; i < w_size; i++)
-                            model.w[i] = 0;
-
                     train_one(sub_prob, param, model.w, weighted_C[0], weighted_C[1]);
                 } else {
                     model.w = new double[w_size * nr_class];
@@ -1853,13 +1755,6 @@ public class Linear {
                             sub_prob.y[k] = +1;
                         for (; k < sub_prob.l; k++)
                             sub_prob.y[k] = -1;
-
-                        if (param.init_sol != null)
-                            for (int j = 0; j < w_size; j++)
-                                w[j] = param.init_sol[j * nr_class + i];
-                        else
-                            for (int j = 0; j < w_size; j++)
-                                w[j] = 0;
 
                         train_one(sub_prob, param, w, weighted_C[i], param.C);
 
@@ -1882,18 +1777,14 @@ public class Linear {
     }
 
     private static void train_one(Problem prob, Parameter param, double[] w, double Cp, double Cn) {
-        // inner and outer tolerances for TRON
         double eps = param.eps;
-        double eps_cg = 0.1;
-        if (param.init_sol != null)
-            eps_cg = 0.5;
-
         int pos = 0;
         for (int i = 0; i < prob.l; i++)
             if (prob.y[i] > 0) {
                 pos++;
             }
         int neg = prob.l - pos;
+
         double primal_solver_tol = eps * Math.max(Math.min(pos, neg), 1) / prob.l;
 
         Function fun_obj = null;
@@ -1907,7 +1798,7 @@ public class Linear {
                         C[i] = Cn;
                 }
                 fun_obj = new L2R_LrFunction(prob, C);
-                Tron tron_obj = new Tron(fun_obj, primal_solver_tol, param.max_iters, eps_cg);
+                Tron tron_obj = new Tron(fun_obj, primal_solver_tol);
                 tron_obj.tron(w);
                 break;
             }
@@ -1920,28 +1811,28 @@ public class Linear {
                         C[i] = Cn;
                 }
                 fun_obj = new L2R_L2_SvcFunction(prob, C);
-                Tron tron_obj = new Tron(fun_obj, primal_solver_tol, param.max_iters, eps_cg);
+                Tron tron_obj = new Tron(fun_obj, primal_solver_tol);
                 tron_obj.tron(w);
                 break;
             }
             case L2R_L2LOSS_SVC_DUAL:
-                solve_l2r_l1l2_svc(prob, w, eps, Cp, Cn, SolverType.L2R_L2LOSS_SVC_DUAL, param.max_iters);
+                solve_l2r_l1l2_svc(prob, w, eps, Cp, Cn, SolverType.L2R_L2LOSS_SVC_DUAL);
                 break;
             case L2R_L1LOSS_SVC_DUAL:
-                solve_l2r_l1l2_svc(prob, w, eps, Cp, Cn, SolverType.L2R_L1LOSS_SVC_DUAL, param.max_iters);
+                solve_l2r_l1l2_svc(prob, w, eps, Cp, Cn, SolverType.L2R_L1LOSS_SVC_DUAL);
                 break;
             case L1R_L2LOSS_SVC: {
                 Problem prob_col = transpose(prob);
-                solve_l1r_l2_svc(prob_col, w, primal_solver_tol, Cp, Cn, param.max_iters);
+                solve_l1r_l2_svc(prob_col, w, primal_solver_tol, Cp, Cn);
                 break;
             }
             case L1R_LR: {
                 Problem prob_col = transpose(prob);
-                solve_l1r_lr(prob_col, w, primal_solver_tol, Cp, Cn, param.max_iters);
+                solve_l1r_lr(prob_col, w, primal_solver_tol, Cp, Cn);
                 break;
             }
             case L2R_LR_DUAL:
-                solve_l2r_lr_dual(prob, w, eps, Cp, Cn, param.max_iters);
+                solve_l2r_lr_dual(prob, w, eps, Cp, Cn);
                 break;
             case L2R_L2LOSS_SVR: {
                 double[] C = new double[prob.l];
@@ -1949,7 +1840,7 @@ public class Linear {
                     C[i] = param.C;
 
                 fun_obj = new L2R_L2_SvrFunction(prob, C, param.p);
-                Tron tron_obj = new Tron(fun_obj, param.eps, param.max_iters, eps_cg);
+                Tron tron_obj = new Tron(fun_obj, param.eps);
                 tron_obj.tron(w);
                 break;
             }
@@ -1961,30 +1852,6 @@ public class Linear {
             default:
                 throw new IllegalStateException("unknown solver type: " + param.solverType);
         }
-    }
-
-    // Calculate the initial C for parameter selection
-    private static double calc_start_C(Problem prob, Parameter param) {
-        int i;
-        double xTx, max_xTx;
-        max_xTx = 0;
-        for (i = 0; i < prob.l; i++) {
-            xTx = 0;
-            for (Feature xi : prob.x[i]) {
-                double val = xi.getValue();
-                xTx += val * val;
-            }
-            if (xTx > max_xTx)
-                max_xTx = xTx;
-        }
-
-        double min_C = 1.0;
-        if (param.getSolverType() == SolverType.L2R_LR)
-            min_C = 1.0 / (prob.l * max_xTx);
-        else if (param.getSolverType() == SolverType.L2R_L2LOSS_SVC)
-            min_C = 1.0 / (2 * prob.l * max_xTx);
-
-        return Math.pow(2, Math.floor(Math.log(min_C) / Math.log(2.0)));
     }
 
     public static void disableDebugOutput() {
@@ -1999,10 +1866,6 @@ public class Linear {
         synchronized (OUTPUT_MUTEX) {
             DEBUG_OUTPUT = debugOutput;
         }
-    }
-
-    public static int getVersion() {
-        return VERSION;
     }
 
     /**

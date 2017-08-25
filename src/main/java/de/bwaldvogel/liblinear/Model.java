@@ -33,13 +33,29 @@ public final class Model implements Serializable {
     /** feature weight array */
     double[]                  w;
 
+    public Model () {}
     /**
      * @return number of classes
      */
+    public Model (double bias, int[] label, int nr_class, int nr_feature, SolverType solverType, double[] w){
+    	
+    	this.bias = bias;
+    	this.label = label;
+    	this.nr_class = nr_class;
+    	this.nr_feature = nr_feature;
+    	this.solverType = solverType;
+    	this.w = w;
+    	
+    }
+    
+    public SolverType getSolverType (){
+    	return this.solverType;
+    }
+    
     public int getNrClass() {
         return nr_class;
     }
-
+    
     /**
      * @return number of features
      */
@@ -51,13 +67,8 @@ public final class Model implements Serializable {
         return copyOf(label, nr_class);
     }
 
-    public SolverType getSolverType() {
-        return solverType;
-    }
-
     /**
-     * The array w gives feature weights; its size is
-     * nr_feature*nr_class but is nr_feature if nr_class = 2. We use one
+     * The nr_feature*nr_class array w gives feature weights. We use one
      * against the rest for multi-class classification, so each feature
      * index corresponds to nr_class weight values. Weights are
      * organized in the following way
@@ -79,6 +90,29 @@ public final class Model implements Serializable {
         return Linear.copyOf(w, w.length);
     }
 
+    public void setSolverType (SolverType solverType){
+    	this.solverType = solverType;
+    }
+
+    public void setNrClass (int nr_class){
+    	this.nr_class = nr_class;
+    }
+    
+    public void setNrFeature(int nr_feature) {
+        this.nr_feature = nr_feature;
+    }
+    
+    public void setLabels (int[] label){
+    	this.label=label;
+    }
+    
+    public void setBias (double bias){
+    	this.bias=bias;
+    }
+    
+    public void setFeatureWeights (double[] w){
+    	this.w =w;
+    }
     /**
      * @return true for logistic regression solvers
      */

@@ -1,9 +1,10 @@
 apply plugin: 'java'
 apply plugin: 'eclipse'
-apply plugin: 'nexus'
+apply plugin: 'maven'
 apply plugin: 'org.standardout.versioneye'
 
-version = '2.11'
+version = '2.11-turn-1.0'
+group= 'de.bwaldvogel'
 
 sourceCompatibility = 1.7
 targetCompatibility = 1.7
@@ -14,6 +15,13 @@ ext {
     title = 'liblinear'
     description = 'Java port of Liblinear'
     url = 'https://www.github.com/bwaldvogel/liblinear'
+	
+	if (!project.hasProperty("mavenUser")){
+	    ext.mavenUser = "turn-ci"
+	}
+	if (!project.hasProperty("mavenPassword")){
+	    ext.mavenPassword = "turn-ci"
+	}
 }
 
 jar {
@@ -25,7 +33,7 @@ jar {
 // https://github.com/bmuschko/gradle-nexus-plugin
 buildscript {
     repositories {
-        jcenter()
+        jcenter()	
     }
 
     dependencies {
@@ -38,46 +46,6 @@ ext {
     junitVersion = '4.12'
     assertjVersion = '2.6.0'
     powermockVersion = '1.6.5'
-}
-
-modifyPom {
-    project {
-        groupId        'de.bwaldvogel'
-        artifactId     'liblinear'
-        name           title
-        description    description
-        url            url
-        inceptionYear '2008'
-
-        scm {
-            url 'git@github.com:bwaldvogel/liblinear.git'
-            connection 'scm:git:git@github.com:bwaldvogel/liblinear.git'
-            developerConnection 'scm:git:git@github.com:bwaldvogel/liblinear.git'
-        }
-
-        licenses {
-            license {
-                name 'The BSD License'
-                url 'http://www.opensource.org/licenses/bsd-license.php'
-                distribution 'repo'
-            }
-        }
-
-        developers {
-            developer {
-                id 'bwaldvogel'
-                name 'Benedikt Waldvogel'
-                email 'mail@bwaldvogel.de'
-            }
-        }
-    }
-}
-
-nexus {
-    attachSources = true
-    attachTests = false
-    attachJavadoc = true
-    sign = true
 }
 
 repositories {
@@ -93,7 +61,20 @@ dependencies {
     testCompile group: 'junit', name: 'junit', version: junitVersion
     testCompile group: 'org.assertj', name: 'assertj-core', version: assertjVersion
     testCompile group: 'org.powermock', name: 'powermock-module-junit4', version: powermockVersion
-    testCompile group: 'org.powermock', name: 'powermock-api-mockito', version: powermockVersion
+    testCompile group: 'org.powermock', name: 'powermock-api-mockito', version: powermockVersion	
 }
+
+	uploadArchives {
+	    repositories {
+	        mavenDeployer {
+	            repository(url: "http://maven.turn.com/content/repositories/turn/") {
+	                authentication(userName: mavenUser, password: mavenPassword)
+	                pom.version = project.version
+	                pom.groupId = project.group
+	                pom.artifactId = project.name
+	            }
+	        }
+	    }
+	}	
 
 // vim: set ts=4 sw=4 et:
